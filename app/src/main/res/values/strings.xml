@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SmartType AI Keyboard</string>
+    <string name="keyboard_name">SmartType AI Keyboard</string>
+    <string name="keyboard_settings">SmartType AI Keyboard Settings</string>
+    
+    <!-- Features -->
+    <string name="feature_grammar">Smart Grammar Correction</string>
+    <string name="feature_tone">Intelligent Tone Adjustment</string>
+    <string name="feature_suggestions">AI-Powered Suggestions</string>
+    <string name="feature_glide">Enhanced Glide Typing</string>
+    <string name="feature_voice">Voice Input Integration</string>
+    <string name="feature_privacy">Privacy-First Design</string>
+    <string name="feature_themes">Customizable Themes</string>
+    <string name="feature_sync">Cross-Platform Sync</string>
+    
+    <!-- Settings -->
+    <string name="settings_general">General</string>
+    <string name="settings_typing">Typing</string>
+    <string name="settings_feedback">Feedback</string>
+    <string name="settings_ai">AI Features</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_auto_correct">Auto Correct</string>
+    <string name="settings_smart_predictions">Smart Predictions</string>
+    <string name="settings_glide_typing">Glide Typing</string>
+    <string name="settings_voice_input">Voice Input</string>
+    <string name="settings_haptic_feedback">Haptic Feedback</string>
+    <string name="settings_sound_feedback">Sound Feedback</string>
+    <string name="settings_ai_features">AI Features</string>
+    <string name="settings_privacy_mode">Privacy Mode</string>
+    <string name="settings_cloud_sync">Cloud Sync</string>
+    
+    <!-- Tones -->
+    <string name="tone_professional">Professional</string>
+    <string name="tone_casual">Casual</string>
+    <string name="tone_polite">Polite</string>
+    <string name="tone_friendly">Friendly</string>
+    <string name="tone_confident">Confident</string>
+    <string name="tone_empathetic">Empathetic</string>
+    <string name="tone_persuasive">Persuasive</string>
+    <string name="tone_concise">Concise</string>
+    <string name="tone_detailed">Detailed</string>
+    <string name="tone_creative">Creative</string>
+    <string name="tone_technical">Technical</string>
+    <string name="tone_romantic">Romantic</string>
+    <string name="tone_humorous">Humorous</string>
+    <string name="tone_sarcasm">Sarcastic</string>
+    <string name="tone_gen_z">Gen Z</string>
+    
+    <!-- Messages -->
+    <string name="msg_keyboard_enabled">SmartType AI Keyboard is enabled and ready to use!</string>
+    <string name="msg_enable_keyboard">Enable SmartType AI Keyboard in your device settings</string>
+    <string name="msg_select_keyboard">Select SmartType AI Keyboard as your default keyboard</string>
+    <string name="msg_welcome">Welcome to SmartType AI Keyboard</string>
+    <string name="msg_welcome_description">An AI-powered keyboard that helps you communicate better with perfect grammar, appropriate tone, and intelligent suggestions.</string>
+    
+    <!-- Premium -->
+    <string name="premium_features">Premium Features</string>
+    <string name="premium_description">Unlock advanced AI features, unlimited usage, and priority support</string>
+    <string name="upgrade_premium">Upgrade to Premium</string>
+    
+    <!-- Errors -->
+    <string name="error_generic">Something went wrong. Please try again.</string>
+    <string name="error_network">Network error. Please check your connection.</string>
+    <string name="error_permission">Permission required to use this feature.</string>
+</resources>
