@@ -1,6 +1,7 @@
 package com.smarttype.aikeyboard.ai
 
 import com.smarttype.aikeyboard.data.model.SuggestionCategory
+import com.smarttype.aikeyboard.data.remote.OpenAiClient
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,22 +11,25 @@ import javax.inject.Singleton
 
 /**
  * Grammar correction engine that provides real-time grammar, spelling, and punctuation checking.
- * 
- * This engine uses heuristic-based rules to detect and correct common grammar mistakes.
- * It can be extended with AI/ML models for more advanced grammar checking in the future.
- * 
+ *
+ * This engine uses OpenAI API for accurate grammar and spelling corrections.
+ * Falls back to heuristic-based rules if OpenAI is unavailable.
+ *
  * Features:
+ * - AI-powered grammar and spelling correction via OpenAI
  * - Capitalization correction
  * - Pronoun capitalization (e.g., "i" -> "I")
  * - Punctuation fixes
- * - Contraction handling based on tone/category
- * - Oxford comma insertion for formal writing
- * 
+ * - Abbreviation expansion (e.g., "r" -> "are", "u" -> "you")
+ * - Context-aware corrections
+ *
  * @see Correction
  * @see GrammarResult
  */
 @Singleton
-class GrammarEngine @Inject constructor() {
+class GrammarEngine @Inject constructor(
+    private val openAiClient: OpenAiClient
+) {
 
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 
@@ -75,7 +79,8 @@ class GrammarEngine @Inject constructor() {
     }
 
     /**
-     * Checks grammar and returns corrections.
+     * Checks grammar and returns corrections using OpenAI API.
+     * Falls back to heuristic checks if OpenAI is unavailable.
      * 
      * @param text The text to check
      * @param language Language code (default: "en" for English)
@@ -97,6 +102,33 @@ class GrammarEngine @Inject constructor() {
             )
         }
 
+        // Try OpenAI first for accurate corrections
+        val openAiCorrected = try {
+            openAiClient.correctGrammarAndSpelling(normalizedInput)
+        } catch (e: Exception) {
+            null
+        }
+
+        if (openAiCorrected != null && openAiCorrected != normalizedInput) {
+            // OpenAI provided a correction
+            return@withContext GrammarResult(
+                originalText = normalizedInput,
+                correctedText = openAiCorrected,
+                corrections = listOf(
+                    Correction(
+                        original = normalizedInput,
+                        corrected = openAiCorrected,
+                        type = CorrectionType.GRAMMAR,
+                        startIndex = 0,
+                        endIndex = normalizedInput.length,
+                        explanation = "AI-corrected grammar, spelling, and punctuation"
+                    )
+                ),
+                confidence = 0.95f // High confidence for AI corrections
+            )
+        }
+
+        // Fallback to heuristic checks if OpenAI is unavailable or returned same text
         val aiCorrections = runHeuristicChecks(
             text = normalizedInput,
             language = language,
@@ -128,6 +160,7 @@ class GrammarEngine @Inject constructor() {
         corrections += fixStandalonePronoun(text)
         corrections += fixRepeatedSpaces(text)
         corrections += fixCommonContractions(text, language, category)
+        corrections += expandAbbreviations(text)
         corrections += ensureOxfordComma(text, category)
         return corrections.filterNotNull()
     }
@@ -201,6 +234,66 @@ class GrammarEngine @Inject constructor() {
                 explanation = "Expanded contraction for a more formal tone"
             )
         }.toList()
+    }
+    
+    /**
+     * Expands common text abbreviations to full words.
+     * Examples: "r" -> "are", "u" -> "you", "ur" -> "your", etc.
+     */
+    private fun expandAbbreviations(text: String): List<Correction> {
+        val abbreviations = mapOf(
+            "\\br\\b" to "are",
+            "\\bu\\b" to "you",
+            "\\bur\\b" to "your",
+            "\\b2\\b" to "to",
+            "\\b4\\b" to "for",
+            "\\bthx\\b" to "thanks",
+            "\\bthnx\\b" to "thanks",
+            "\\bplz\\b" to "please",
+            "\\bpls\\b" to "please",
+            "\\bcuz\\b" to "because",
+            "\\bcoz\\b" to "because",
+            "\\bw\\b" to "with",
+            "\\bw\\/\\b" to "with",
+            "\\bw\\/o\\b" to "without",
+            "\\bw\\/out\\b" to "without",
+            "\\bthru\\b" to "through",
+            "\\btho\\b" to "though",
+            "\\bthru\\b" to "through",
+            "\\b2day\\b" to "today",
+            "\\b2moro\\b" to "tomorrow",
+            "\\b2nite\\b" to "tonight",
+            "\\b4ever\\b" to "forever",
+            "\\bgr8\\b" to "great",
+            "\\bl8r\\b" to "later",
+            "\\bomg\\b" to "oh my god",
+            "\\blol\\b" to "laugh out loud",
+            "\\bbrb\\b" to "be right back",
+            "\\bafk\\b" to "away from keyboard",
+            "\\bimo\\b" to "in my opinion",
+            "\\bfyi\\b" to "for your information"
+        )
+        
+        val corrections = mutableListOf<Correction>()
+        abbreviations.forEach { (pattern, expansion) ->
+            val regex = pattern.toRegex(RegexOption.IGNORE_CASE)
+            regex.findAll(text).forEach { match ->
+                // Only expand if it's lowercase (to avoid expanding "R" in "R&D" or "U" in "U.S.")
+                if (match.value.all { it.isLowerCase() || it.isDigit() }) {
+                    corrections.add(
+                        Correction(
+                            original = match.value,
+                            corrected = expansion,
+                            type = CorrectionType.GRAMMAR,
+                            startIndex = match.range.first,
+                            endIndex = match.range.last + 1,
+                            explanation = "Expanded abbreviation \"${match.value}\" to \"$expansion\""
+                        )
+                    )
+                }
+            }
+        }
+        return corrections
     }
 
     private fun ensureOxfordComma(

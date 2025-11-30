@@ -27,6 +27,8 @@ import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,7 +47,6 @@ import com.smarttype.aikeyboard.data.model.DefaultThemes
 import com.smarttype.aikeyboard.data.model.KeyboardTheme
 import com.smarttype.aikeyboard.data.model.UserPreferences
 import com.smarttype.aikeyboard.ui.viewmodel.KeyboardViewModel
-import kotlinx.coroutines.delay
 
 @Composable
 fun KeyboardComposeView(
@@ -56,21 +57,30 @@ fun KeyboardComposeView(
     onEnter: () -> Unit,
     onSpace: () -> Unit,
     onSuggestionSelect: (String) -> Unit,
-    onToneChange: (String) -> Unit,
     onVoiceInput: () -> Unit,
-    onApplyGrammar: (String) -> Unit,
-    onApplyTone: (String) -> Unit
+    onApplyGrammar: (String) -> Unit
 ) {
+    // Use derivedStateOf to prevent unnecessary recomposition
     val userPreferences by viewModel.userPreferences.collectAsState()
-    val suggestions by viewModel.suggestions.collectAsState()
-    val selectedTone by viewModel.selectedTone.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val grammarResult by viewModel.grammarResult.collectAsState()
+    val spellingResult by viewModel.spellingResult.collectAsState()
+    
+    // Keyboard state - these don't change during typing, so stable
+    val isCapsLock by viewModel.isCapsLock.collectAsState()
+    val isShiftPressed by viewModel.isShiftPressed.collectAsState()
+    val showNumbers by viewModel.showNumbers.collectAsState()
+    val showSymbols by viewModel.showSymbols.collectAsState()
+    
+    // AI menu and result state
+    val showAiMenu by viewModel.showAiMenu.collectAsState()
+    val showAiResult by viewModel.showAiResult.collectAsState()
+    
+    // Only read currentText when needed (for AI result screen)
     val currentText by viewModel.currentText.collectAsState()
-    val toneResult by viewModel.toneResult.collectAsState()
 
-    val theme = getCurrentTheme(userPreferences)
+    val theme = remember(userPreferences) { getCurrentTheme(userPreferences) }
 
     Column(
         modifier = Modifier
@@ -78,58 +88,69 @@ fun KeyboardComposeView(
             .background(theme.backgroundColor)
             .padding(4.dp)
     ) {
-        if (suggestions.isNotEmpty()) {
-            SuggestionBar(
-                suggestions = suggestions,
+        
+        // AI Menu (inline, not dialog) - Show only menu, hide keyboard
+        if (showAiMenu && !showAiResult) {
+            AiMenu(
                 theme = theme,
-                onSuggestionSelect = onSuggestionSelect
+                onDismiss = { viewModel.closeAiMenu() },
+                onSpellingGrammarClick = { viewModel.checkSpellingAndGrammar() },
+                onToneClick = { 
+                    viewModel.closeAiMenu()
+                },
+                onTranslateClick = { /* TODO: Implement translation */ },
+                onSmartReplyClick = { /* TODO: Implement smart reply */ }
             )
             Spacer(modifier = Modifier.height(4.dp))
         }
-
-        grammarResult?.let { result ->
-            if (result.correctedText.isNotBlank() && result.correctedText != currentText) {
-                GrammarSuggestionCard(
-                    suggestedText = result.correctedText,
-                    explanation = result.corrections.firstOrNull()?.explanation
-                        ?: "Suggested improvement",
-                    confidence = result.confidence,
+        
+        // AI Result Screen (inline, not dialog) - Show only result, hide keyboard
+        if (showAiResult && (spellingResult != null || grammarResult != null)) {
+            AiResultScreen(
+                originalText = currentText,
+                spellingResult = spellingResult,
+                grammarResult = grammarResult,
+                theme = theme,
+                onDismiss = { viewModel.closeAiResult() },
+                onReplace = { correctedText ->
+                    viewModel.setFullText(correctedText)
+                    onApplyGrammar(correctedText)
+                }
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+        
+        // Show keyboard only when AI menu and result are both hidden
+        if (!showAiMenu && !showAiResult) {
+            // Enhanced keyboard layout with caps, numbers, and symbols
+            if (showSymbols) {
+                SymbolsKeyboardLayout(
                     theme = theme,
-                    onApply = onApplyGrammar
+                    onKeyPress = onKeyPress,
+                    onBackspace = onBackspace,
+                    onEnter = onEnter,
+                    onSpace = onSpace,
+                    onNumbersToggle = { viewModel.toggleSymbols() }
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+            } else {
+                EnhancedKeyboardLayout(
+                    theme = theme,
+                    onKeyPress = onKeyPress,
+                    onBackspace = onBackspace,
+                    onEnter = onEnter,
+                    onSpace = onSpace,
+                    onVoiceInput = onVoiceInput,
+                    onAiButtonClick = { viewModel.openAiMenu() },
+                    onShiftToggle = { viewModel.toggleShift() },
+                    onNumbersToggle = { viewModel.toggleNumbers() },
+                    onSymbolsToggle = { viewModel.toggleSymbols() },
+                    isCapsLock = isCapsLock,
+                    isShiftPressed = isShiftPressed,
+                    showNumbers = showNumbers,
+                    showSymbols = showSymbols
+                )
             }
         }
-
-        ToneSelectionBar(
-            selectedTone = selectedTone,
-            theme = theme,
-            onToneChange = onToneChange
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-
-        toneResult?.let { result ->
-            if (result.transformedText.isNotBlank() && result.transformedText != currentText) {
-                ToneSuggestionCard(
-                    toneName = result.tone.name,
-                    suggestedText = result.transformedText,
-                    changes = result.changes.take(3),
-                    confidence = result.confidence,
-                    theme = theme,
-                    onApply = onApplyTone
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-        }
-
-        KeyboardLayout(
-            theme = theme,
-            onKeyPress = onKeyPress,
-            onBackspace = onBackspace,
-            onEnter = onEnter,
-            onSpace = onSpace,
-            onVoiceInput = onVoiceInput
-        )
 
         if (isLoading) {
             Box(
@@ -346,139 +367,7 @@ private fun ToneSelectionBar(
     }
 }
 
-@Composable
-private fun KeyboardLayout(
-    theme: KeyboardTheme,
-    onKeyPress: (String) -> Unit,
-    onBackspace: () -> Unit,
-    onEnter: () -> Unit,
-    onSpace: () -> Unit,
-    onVoiceInput: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        KeyboardRow(
-            keys = listOf("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"),
-            theme = theme,
-            onKeyPress = onKeyPress
-        )
-
-        KeyboardRow(
-            keys = listOf("A", "S", "D", "F", "G", "H", "J", "K", "L"),
-            theme = theme,
-            onKeyPress = onKeyPress,
-            modifier = Modifier.padding(start = 20.dp)
-        )
-
-        KeyboardRow(
-            keys = listOf("Z", "X", "C", "V", "B", "N", "M"),
-            theme = theme,
-            onKeyPress = onKeyPress,
-            modifier = Modifier.padding(start = 40.dp)
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            KeyboardKey(
-                text = "🎤",
-                theme = theme,
-                onKeyPress = { onVoiceInput() },
-                modifier = Modifier.weight(1f)
-            )
-            KeyboardKey(
-                text = "SPACE",
-                theme = theme,
-                onKeyPress = { onSpace() },
-                modifier = Modifier.weight(4f)
-            )
-            KeyboardKey(
-                text = "⌫",
-                theme = theme,
-                onKeyPress = { onBackspace() },
-                modifier = Modifier.weight(1f)
-            )
-            KeyboardKey(
-                text = "↵",
-                theme = theme,
-                onKeyPress = { onEnter() },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun KeyboardRow(
-    keys: List<String>,
-    theme: KeyboardTheme,
-    onKeyPress: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        keys.forEach { key ->
-            KeyboardKey(
-                text = key,
-                theme = theme,
-                onKeyPress = onKeyPress,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun KeyboardKey(
-    text: String,
-    theme: KeyboardTheme,
-    onKeyPress: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var isPressed by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isPressed) {
-        if (isPressed) {
-            delay(100)
-            isPressed = false
-        }
-    }
-
-    Card(
-        modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(8.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isPressed) theme.keyPressedColor else theme.keyBackgroundColor
-        ),
-        border = CardDefaults.outlinedCardBorder().copy(
-            brush = SolidColor(theme.borderColor),
-            width = 1.dp
-        ),
-        onClick = {
-            isPressed = true
-            onKeyPress(text)
-        }
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                color = theme.keyTextColor
-            )
-        }
-    }
-}
+// Old KeyboardLayout removed - now using EnhancedKeyboardLayout from EnhancedKeyboardLayout.kt
 
 private fun getCurrentTheme(userPreferences: UserPreferences?): KeyboardTheme {
     val themeId = userPreferences?.selectedTheme ?: "default"

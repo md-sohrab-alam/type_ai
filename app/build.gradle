@@ -106,8 +106,12 @@ dependencies {
     // JSON
     implementation 'com.google.code.gson:gson:2.10.1'
 
-    // NLP / Grammar Checking (heuristic placeholder)
-
+    // ML Kit for Grammar & Spelling (will integrate later)
+    // implementation 'com.google.mlkit:genai-proofreading:1.0.0-beta1'
+    
+    // LanguageTool for comprehensive grammar checking (optional - has dependency conflicts)
+    // implementation 'org.languagetool:language-all:6.4'
+    
     // Networking
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     

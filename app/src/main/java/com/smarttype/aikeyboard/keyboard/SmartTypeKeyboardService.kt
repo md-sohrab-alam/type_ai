@@ -22,6 +22,7 @@ import javax.inject.Inject
 import com.smarttype.aikeyboard.data.repository.UserPreferencesRepository
 import com.smarttype.aikeyboard.data.repository.TextSuggestionRepository
 import com.smarttype.aikeyboard.ai.GrammarEngine
+import com.smarttype.aikeyboard.ai.SpellingChecker
 import com.smarttype.aikeyboard.ai.ToneEngine
 
 /**
@@ -60,6 +61,7 @@ class SmartTypeKeyboardService : InputMethodService(),
     @Inject lateinit var userPreferencesRepository: UserPreferencesRepository
     @Inject lateinit var textSuggestionRepository: TextSuggestionRepository
     @Inject lateinit var grammarEngine: GrammarEngine
+    @Inject lateinit var spellingChecker: SpellingChecker
     @Inject lateinit var toneEngine: ToneEngine
 
     /**
@@ -76,6 +78,7 @@ class SmartTypeKeyboardService : InputMethodService(),
                         userPreferencesRepository = userPreferencesRepository,
                         textSuggestionRepository = textSuggestionRepository,
                         grammarEngine = grammarEngine,
+                        spellingChecker = spellingChecker,
                         toneEngine = toneEngine
                     ) as T
                 }
@@ -173,10 +176,8 @@ class SmartTypeKeyboardService : InputMethodService(),
                 onEnter = { handleEnter() },
                 onSpace = { handleSpace() },
                 onSuggestionSelect = { suggestion -> handleSuggestionSelection(suggestion) },
-                onToneChange = { tone -> keyboardViewModel.changeTone(tone) },
                 onVoiceInput = { handleVoiceInput() },
-                onApplyGrammar = { corrected -> applyGrammarCorrection(corrected) },
-                onApplyTone = { transformed -> applyToneTransformation(transformed) }
+                onApplyGrammar = { corrected -> applyGrammarCorrection(corrected) }
             )
         }
 
@@ -211,22 +212,20 @@ class SmartTypeKeyboardService : InputMethodService(),
 
     /**
      * Handles enter key press.
-     * Inserts a newline and triggers grammar checking.
+     * Inserts a newline (no automatic grammar checking).
      */
     private fun handleEnter() {
         currentInputConnection?.commitText("\n", 1)
         keyboardViewModel.onEnter()
-        keyboardViewModel.checkGrammar()
     }
 
     /**
      * Handles space key press.
-     * Inserts a space and triggers grammar checking.
+     * Inserts a space (no automatic grammar checking).
      */
     private fun handleSpace() {
         currentInputConnection?.commitText(" ", 1)
         keyboardViewModel.onSpace()
-        keyboardViewModel.checkGrammar()
     }
 
     /**

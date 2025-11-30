@@ -5,6 +5,7 @@ import android.view.inputmethod.EditorInfo
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.smarttype.aikeyboard.ai.GrammarEngine
+import com.smarttype.aikeyboard.ai.SpellingChecker
 import com.smarttype.aikeyboard.ai.ToneEngine
 import com.smarttype.aikeyboard.data.model.UserPreferences
 import com.smarttype.aikeyboard.data.repository.TextSuggestionRepository
@@ -13,6 +14,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 
 @HiltViewModel
@@ -21,6 +23,7 @@ class KeyboardViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val textSuggestionRepository: TextSuggestionRepository,
     private val grammarEngine: GrammarEngine,
+    private val spellingChecker: SpellingChecker,
     private val toneEngine: ToneEngine
 ) : AndroidViewModel(application) {
     
@@ -44,6 +47,30 @@ class KeyboardViewModel @Inject constructor(
     
     private val _toneResult = MutableStateFlow<ToneEngine.ToneResult?>(null)
     val toneResult: StateFlow<ToneEngine.ToneResult?> = _toneResult.asStateFlow()
+    
+    // Spelling check results
+    private val _spellingResult = MutableStateFlow<SpellingChecker.SpellingResult?>(null)
+    val spellingResult: StateFlow<SpellingChecker.SpellingResult?> = _spellingResult.asStateFlow()
+    
+    // Keyboard state
+    private val _isCapsLock = MutableStateFlow(false)
+    val isCapsLock: StateFlow<Boolean> = _isCapsLock.asStateFlow()
+    
+    private val _isShiftPressed = MutableStateFlow(false)
+    val isShiftPressed: StateFlow<Boolean> = _isShiftPressed.asStateFlow()
+    
+    private val _showNumbers = MutableStateFlow(false)
+    val showNumbers: StateFlow<Boolean> = _showNumbers.asStateFlow()
+    
+    private val _showSymbols = MutableStateFlow(false)
+    val showSymbols: StateFlow<Boolean> = _showSymbols.asStateFlow()
+    
+    // AI menu state
+    private val _showAiMenu = MutableStateFlow(false)
+    val showAiMenu: StateFlow<Boolean> = _showAiMenu.asStateFlow()
+    
+    private val _showAiResult = MutableStateFlow(false)
+    val showAiResult: StateFlow<Boolean> = _showAiResult.asStateFlow()
     
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -84,35 +111,84 @@ class KeyboardViewModel @Inject constructor(
     }
     
     fun onKeyPressed(key: String) {
-        _currentText.value += key
-        updateSuggestions()
+        val textToAdd = if (_isCapsLock.value || _isShiftPressed.value) {
+            key.uppercase()
+        } else {
+            key.lowercase()
+        }
+        _currentText.value += textToAdd
+        
+        // Reset shift after one character (unless caps lock is on)
+        if (_isShiftPressed.value && !_isCapsLock.value) {
+            _isShiftPressed.value = false
+        }
+        
+        // Don't update suggestions while typing to prevent flickering
+        // Suggestions will be updated when user pauses or selects AI features
     }
     
     fun onTextInput(text: String) {
         _currentText.value += text
-        updateSuggestions()
+        // No suggestions update to prevent flickering
     }
     
     fun setFullText(text: String) {
         _currentText.value = text
-        updateSuggestions()
+        // No suggestions update to prevent flickering
     }
     
     fun onBackspace() {
         if (_currentText.value.isNotEmpty()) {
             _currentText.value = _currentText.value.dropLast(1)
-            updateSuggestions()
+            // No suggestions update to prevent flickering
         }
     }
     
     fun onEnter() {
         _currentText.value += "\n"
-        updateSuggestions()
+        // No suggestions update to prevent flickering
     }
     
     fun onSpace() {
         _currentText.value += " "
-        updateSuggestions()
+        // No suggestions update to prevent flickering
+    }
+    
+    // Keyboard state management
+    fun toggleShift() {
+        if (_isCapsLock.value) {
+            _isCapsLock.value = false
+        } else {
+            _isShiftPressed.value = !_isShiftPressed.value
+        }
+    }
+    
+    fun toggleCapsLock() {
+        _isCapsLock.value = !_isCapsLock.value
+        _isShiftPressed.value = false
+    }
+    
+    fun toggleNumbers() {
+        if (_showSymbols.value) {
+            // If symbols are showing, switch to numbers/letters
+            _showSymbols.value = false
+            _showNumbers.value = false
+        } else {
+            // Toggle numbers row visibility
+            _showNumbers.value = !_showNumbers.value
+        }
+    }
+    
+    fun toggleSymbols() {
+        if (_showSymbols.value) {
+            // Switch back to letters
+            _showSymbols.value = false
+            _showNumbers.value = false
+        } else {
+            // Switch to symbols keyboard
+            _showSymbols.value = true
+            _showNumbers.value = false
+        }
     }
     
     fun onSuggestionSelected(suggestion: String) {
@@ -281,5 +357,87 @@ class KeyboardViewModel @Inject constructor(
         _suggestions.value = emptyList()
         _grammarResult.value = null
         _toneResult.value = null
+        _spellingResult.value = null
+        _showAiResult.value = false
+    }
+    
+    /**
+     * Opens the AI menu to select features.
+     */
+    fun openAiMenu() {
+        _showAiMenu.value = true
+    }
+    
+    /**
+     * Closes the AI menu.
+     */
+    fun closeAiMenu() {
+        _showAiMenu.value = false
+    }
+    
+    /**
+     * Closes the AI result screen.
+     */
+    fun closeAiResult() {
+        _showAiResult.value = false
+    }
+    
+    /**
+     * On-demand spelling and grammar checking.
+     * Called when user explicitly requests it from AI menu.
+     */
+    fun checkSpellingAndGrammar() {
+        viewModelScope.launch {
+            val text = _currentText.value
+            if (text.isBlank()) {
+                _error.value = "No text to check"
+                return@launch
+            }
+            
+            try {
+                _isLoading.value = true
+                _showAiMenu.value = false
+                
+                // Check spelling
+                val spellingResult = spellingChecker.checkSpelling(text)
+                _spellingResult.value = spellingResult
+                
+                // Check grammar
+                val grammarResult = grammarEngine.checkGrammar(text)
+                _grammarResult.value = grammarResult
+                
+                // Show result screen
+                _showAiResult.value = true
+                
+            } catch (e: Exception) {
+                _error.value = e.message
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Applies a spelling correction.
+     */
+    fun applySpellingCorrection(correction: SpellingChecker.WordCorrection, suggestion: String) {
+        val text = _currentText.value
+        val correctedText = text.replaceRange(
+            correction.startIndex,
+            correction.endIndex,
+            suggestion
+        )
+        _currentText.value = correctedText
+        checkSpellingAndGrammar()
+    }
+    
+    /**
+     * Ignores a spelling correction (adds word to dictionary).
+     */
+    fun ignoreSpellingCorrection(word: String) {
+        viewModelScope.launch {
+            spellingChecker.addToDictionary(word)
+            checkSpellingAndGrammar()
+        }
     }
 }
