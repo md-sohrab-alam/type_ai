@@ -5,6 +5,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +28,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import android.view.inputmethod.EditorInfo
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.runtime.getValue
 
 /**
  * Enhanced keyboard layout with support for:
@@ -44,9 +50,11 @@ fun EnhancedKeyboardLayout(
     onSpace: () -> Unit,
     onVoiceInput: () -> Unit,
     onAiButtonClick: () -> Unit,
+    onEmojiClick: () -> Unit,
     onShiftToggle: () -> Unit,
     onNumbersToggle: () -> Unit,
     onSymbolsToggle: () -> Unit,
+    imeAction: Int = android.view.inputmethod.EditorInfo.IME_ACTION_NONE,
     isCapsLock: Boolean = false,
     isShiftPressed: Boolean = false,
     showNumbers: Boolean = false,
@@ -78,7 +86,9 @@ fun EnhancedKeyboardLayout(
     }
     
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 280.dp), // Minimum height to prevent collapsing
         verticalArrangement = Arrangement.spacedBy(6.dp) // Increased spacing
     ) {
         // Numbers row (always shown at top like standard keyboards)
@@ -124,27 +134,21 @@ fun EnhancedKeyboardLayout(
             )
             
             // Numbers/Symbols toggle - cycles: Letters -> Numbers -> Symbols -> Letters
-            KeyboardKey(
-                text = when {
-                    showSymbols -> "ABC"
-                    showNumbers -> "?123"
-                    else -> "123"
-                },
+            AnimatedNumbersToggleKey(
+                showNumbers = showNumbers,
+                showSymbols = showSymbols,
                 theme = theme,
-                onKeyPress = { 
-                    if (showSymbols) {
-                        // Currently showing symbols, go back to letters
-                        onSymbolsToggle()
-                    } else if (showNumbers) {
-                        // Currently showing numbers row, switch to symbols
-                        onSymbolsToggle()
-                    } else {
-                        // Currently showing letters, show numbers row
-                        onNumbersToggle()
-                    }
-                },
-                modifier = Modifier.weight(1f),
-                isPressed = showNumbers || showSymbols
+                onNumbersToggle = onNumbersToggle,
+                onSymbolsToggle = onSymbolsToggle,
+                modifier = Modifier.weight(1f)
+            )
+            
+            // Emoji button
+            KeyboardKey(
+                text = "😀",
+                theme = theme,
+                onKeyPress = { onEmojiClick() },
+                modifier = Modifier.weight(1f)
             )
             
             // AI button
@@ -179,11 +183,11 @@ fun EnhancedKeyboardLayout(
                 modifier = Modifier.weight(1f)
             )
             
-            // Enter
-            KeyboardKey(
-                text = "↵",
+            // Enter/IME Action button
+            ImeActionKey(
+                imeAction = imeAction,
                 theme = theme,
-                onKeyPress = { onEnter() },
+                onAction = { onEnter() },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -272,7 +276,7 @@ fun SymbolsKeyboardLayout(
 }
 
 /**
- * Enhanced keyboard key with press state
+ * Enhanced keyboard key with press state and long-press support for alternate characters
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -284,6 +288,9 @@ fun KeyboardKey(
     isPressed: Boolean = false
 ) {
     var isCurrentlyPressed by remember { mutableStateOf(false) }
+    var showAlternates by remember { mutableStateOf(false) }
+    val alternates = remember(text) { AlternateCharacters.getAlternates(text) }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(isCurrentlyPressed) {
         if (isCurrentlyPressed) {
@@ -298,34 +305,75 @@ fun KeyboardKey(
         else -> theme.keyBackgroundColor
     }
 
-    Card(
+    Box(
         modifier = modifier
-            .height(56.dp) // Increased from 48dp to standard keyboard size
-            .clip(RoundedCornerShape(8.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = backgroundColor
-        ),
-        onClick = {
-            isCurrentlyPressed = true
-            onKeyPress(text)
-        }
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp) // Increased from 48dp to standard keyboard size
+                .clip(RoundedCornerShape(8.dp))
+                .pointerInput(text) {
+                    detectTapGestures(
+                        onPress = {
+                            isCurrentlyPressed = true
+                            coroutineScope.launch {
+                                delay(500) // Wait 500ms for long press
+                                if (isCurrentlyPressed && alternates.isNotEmpty()) {
+                                    showAlternates = true
+                                }
+                            }
+                            // Wait for release
+                            kotlinx.coroutines.delay(100)
+                            if (!showAlternates) {
+                                // Single tap
+                                onKeyPress(text)
+                            }
+                            isCurrentlyPressed = false
+                            showAlternates = false
+                        },
+                        onLongPress = {
+                            if (alternates.isNotEmpty()) {
+                                showAlternates = true
+                            }
+                        }
+                    )
+                },
+            colors = CardDefaults.cardColors(
+                containerColor = backgroundColor
+            )
         ) {
-            Text(
-                text = text,
-                fontSize = 18.sp, // Increased from 16sp for better visibility
-                fontWeight = FontWeight.Medium,
-                color = if (isPressed) Color.White else theme.keyTextColor
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = text,
+                    fontSize = 18.sp, // Increased from 16sp for better visibility
+                    fontWeight = FontWeight.Medium,
+                    color = if (isPressed) Color.White else theme.keyTextColor
+                )
+            }
+        }
+        
+        // Show alternate characters popup
+        if (showAlternates && alternates.isNotEmpty()) {
+            AlternateCharacterPopup(
+                key = text,
+                alternates = alternates,
+                theme = theme,
+                onCharacterSelected = { char ->
+                    onKeyPress(char)
+                    showAlternates = false
+                },
+                onDismiss = { showAlternates = false }
             )
         }
     }
 }
 
 /**
- * Backspace key with long press support for continuous deletion
+ * Backspace key with long press support for continuous deletion and visual feedback
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -336,22 +384,14 @@ fun BackspaceKey(
 ) {
     var isLongPressing by remember { mutableStateOf(false) }
     var isPressed by remember { mutableStateOf(false) }
-    var shouldStartLongPress by remember { mutableStateOf(false) }
-
-    // Handle long press start trigger
-    LaunchedEffect(shouldStartLongPress) {
-        if (shouldStartLongPress) {
-            shouldStartLongPress = false
-            delay(500) // Wait 500ms before starting continuous deletion
-            if (isPressed) {
-                isLongPressing = true
-            }
-        }
-    }
+    var showCancelHint by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // Handle long press continuous deletion
     LaunchedEffect(isLongPressing) {
         if (isLongPressing) {
+            // Initial delay before starting continuous deletion
+            delay(500)
             // Delete continuously while long pressing
             while (isLongPressing && isActive) {
                 onBackspace()
@@ -360,11 +400,13 @@ fun BackspaceKey(
         }
     }
 
-    // Reset press state after release
-    LaunchedEffect(isPressed) {
-        if (isPressed && !isLongPressing) {
-            delay(150)
-            isPressed = false
+    // Show cancel hint after long press starts
+    LaunchedEffect(isLongPressing) {
+        if (isLongPressing) {
+            delay(500)
+            showCancelHint = true
+        } else {
+            showCancelHint = false
         }
     }
 
@@ -379,42 +421,120 @@ fun BackspaceKey(
     val textColor = remember(isLongPressing) {
         if (isLongPressing) Color.White else theme.keyTextColor
     }
+
+    Box(
+        modifier = modifier
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            isPressed = true
+                            coroutineScope.launch {
+                                delay(500)
+                                if (isPressed) {
+                                    isLongPressing = true
+                                }
+                            }
+                            // Wait for release
+                            kotlinx.coroutines.delay(100)
+                            isLongPressing = false
+                            isPressed = false
+                            showCancelHint = false
+                        },
+                        onLongPress = {
+                            isLongPressing = true
+                        },
+                        onTap = {
+                            if (!isLongPressing) {
+                                onBackspace()
+                            }
+                        }
+                    )
+                },
+            colors = CardDefaults.cardColors(
+                containerColor = backgroundColor
+            )
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "⌫",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textColor
+                    )
+                    if (showCancelHint) {
+                        Text(
+                            text = "Release to cancel",
+                            fontSize = 8.sp,
+                            color = textColor.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Animated Numbers/Symbols toggle key with smooth transitions
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnimatedNumbersToggleKey(
+    showNumbers: Boolean,
+    showSymbols: Boolean,
+    theme: KeyboardTheme,
+    onNumbersToggle: () -> Unit,
+    onSymbolsToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val text = remember(showNumbers, showSymbols) {
+        when {
+            showSymbols -> "ABC"
+            showNumbers -> "?123"
+            else -> "123"
+        }
+    }
     
+    val backgroundColor by animateColorAsState(
+        targetValue = if (showNumbers || showSymbols) {
+            theme.accentColor.copy(alpha = 0.7f)
+        } else {
+            theme.keyBackgroundColor
+        },
+        label = "numbersToggleBackground",
+        animationSpec = tween(200)
+    )
+
     Card(
         modifier = modifier
             .height(56.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown()
-                    isPressed = true
-                    shouldStartLongPress = true
-                    
-                    // Wait for up or cancellation
-                    val up = waitForUpOrCancellation()
-                    
-                    // Check if long press was triggered during the wait
-                    val wasLongPress = isLongPressing
-                    
-                    if (up != null) {
-                        // Normal release
-                        if (!wasLongPress) {
-                            onBackspace()
-                        }
-                    }
-                    
-                    isLongPressing = false
-                    isPressed = false
-                    shouldStartLongPress = false
-                }
-            },
+            .clip(RoundedCornerShape(8.dp)),
         colors = CardDefaults.cardColors(
             containerColor = backgroundColor
         ),
         onClick = {
-            // Fallback for single tap (if pointerInput doesn't catch it)
-            if (!isLongPressing && !isPressed) {
-                onBackspace()
+            if (showSymbols) {
+                // Currently showing symbols, go back to letters
+                onSymbolsToggle()
+            } else if (showNumbers) {
+                // Currently showing numbers row, switch to symbols
+                onSymbolsToggle()
+            } else {
+                // Currently showing letters, show numbers row
+                onNumbersToggle()
             }
         }
     ) {
@@ -423,13 +543,42 @@ fun BackspaceKey(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "⌫",
+                text = text,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium,
-                color = textColor
+                color = if (showNumbers || showSymbols) Color.White else theme.keyTextColor
             )
         }
     }
+}
+
+/**
+ * IME Action Key - Shows appropriate action button (Search, Next, Done, etc.)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ImeActionKey(
+    imeAction: Int,
+    theme: KeyboardTheme,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val (actionText, actionIcon) = when (imeAction) {
+        EditorInfo.IME_ACTION_SEARCH -> "🔍" to "Search"
+        EditorInfo.IME_ACTION_GO -> "▶" to "Go"
+        EditorInfo.IME_ACTION_SEND -> "📤" to "Send"
+        EditorInfo.IME_ACTION_NEXT -> "→" to "Next"
+        EditorInfo.IME_ACTION_DONE -> "✓" to "Done"
+        EditorInfo.IME_ACTION_PREVIOUS -> "←" to "Previous"
+        else -> "↵" to "Enter"
+    }
+    
+    KeyboardKey(
+        text = actionText,
+        theme = theme,
+        onKeyPress = { onAction() },
+        modifier = modifier
+    )
 }
 
 /**
@@ -447,14 +596,12 @@ fun KeyboardRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         keys.forEach { key ->
-            key(key) { // Stable key to prevent recomposition
-                KeyboardKey(
-                    text = key,
-                    theme = theme,
-                    onKeyPress = onKeyPress,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+            KeyboardKey(
+                text = key,
+                theme = theme,
+                onKeyPress = onKeyPress,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

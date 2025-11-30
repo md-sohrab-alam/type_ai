@@ -65,6 +65,18 @@ class KeyboardViewModel @Inject constructor(
     private val _showSymbols = MutableStateFlow(false)
     val showSymbols: StateFlow<Boolean> = _showSymbols.asStateFlow()
     
+    // Emoji keyboard state
+    private val _showEmojiKeyboard = MutableStateFlow(false)
+    val showEmojiKeyboard: StateFlow<Boolean> = _showEmojiKeyboard.asStateFlow()
+    
+    // IME action state
+    private val _imeAction = MutableStateFlow<Int>(EditorInfo.IME_ACTION_NONE)
+    val imeAction: StateFlow<Int> = _imeAction.asStateFlow()
+    
+    // Auto-capitalization state
+    private val _shouldCapitalizeNext = MutableStateFlow(false)
+    val shouldCapitalizeNext: StateFlow<Boolean> = _shouldCapitalizeNext.asStateFlow()
+    
     // AI menu state
     private val _showAiMenu = MutableStateFlow(false)
     val showAiMenu: StateFlow<Boolean> = _showAiMenu.asStateFlow()
@@ -97,6 +109,10 @@ class KeyboardViewModel @Inject constructor(
     
     fun updateInputContext(editorInfo: EditorInfo?) {
         viewModelScope.launch {
+            // Update IME action
+            _imeAction.value = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) 
+                ?: EditorInfo.IME_ACTION_NONE
+            
             // Update context based on input type
             val context = when (editorInfo?.inputType) {
                 EditorInfo.TYPE_CLASS_TEXT or EditorInfo.TYPE_TEXT_VARIATION_EMAIL_ADDRESS -> "email"
@@ -111,11 +127,18 @@ class KeyboardViewModel @Inject constructor(
     }
     
     fun onKeyPressed(key: String) {
-        val textToAdd = if (_isCapsLock.value || _isShiftPressed.value) {
+        var textToAdd = if (_isCapsLock.value || _isShiftPressed.value) {
             key.uppercase()
         } else {
             key.lowercase()
         }
+        
+        // Auto-capitalization: capitalize first letter of sentence
+        if (_shouldCapitalizeNext.value && textToAdd.isNotEmpty()) {
+            textToAdd = textToAdd.uppercase()
+            _shouldCapitalizeNext.value = false
+        }
+        
         _currentText.value += textToAdd
         
         // Reset shift after one character (unless caps lock is on)
@@ -152,6 +175,32 @@ class KeyboardViewModel @Inject constructor(
     fun onSpace() {
         _currentText.value += " "
         // No suggestions update to prevent flickering
+    }
+    
+    fun onPeriod() {
+        _currentText.value += "."
+        // After period, capitalize next letter
+        _shouldCapitalizeNext.value = true
+    }
+    
+    fun onExclamation() {
+        _currentText.value += "!"
+        _shouldCapitalizeNext.value = true
+    }
+    
+    fun onQuestionMark() {
+        _currentText.value += "?"
+        _shouldCapitalizeNext.value = true
+    }
+    
+    fun toggleEmojiKeyboard() {
+        _showEmojiKeyboard.value = !_showEmojiKeyboard.value
+        _showSymbols.value = false
+        _showNumbers.value = false
+    }
+    
+    fun closeEmojiKeyboard() {
+        _showEmojiKeyboard.value = false
     }
     
     // Keyboard state management
@@ -207,10 +256,20 @@ class KeyboardViewModel @Inject constructor(
     
     fun startVoiceInput() {
         _isVoiceInputActive.value = true
-        // Voice input implementation would go here
+        // Voice input will be handled by VoiceInputManager in the service
     }
     
     fun stopVoiceInput() {
+        _isVoiceInputActive.value = false
+    }
+    
+    fun onVoiceInputResult(text: String) {
+        _currentText.value += text
+        _isVoiceInputActive.value = false
+    }
+    
+    fun onVoiceInputError(error: String) {
+        _error.value = error
         _isVoiceInputActive.value = false
     }
     
@@ -359,6 +418,8 @@ class KeyboardViewModel @Inject constructor(
         _toneResult.value = null
         _spellingResult.value = null
         _showAiResult.value = false
+        _showAiMenu.value = false
+        _shouldCapitalizeNext.value = true // Capitalize first letter of new input
     }
     
     /**

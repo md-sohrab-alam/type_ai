@@ -63,6 +63,8 @@ class SmartTypeKeyboardService : InputMethodService(),
     @Inject lateinit var grammarEngine: GrammarEngine
     @Inject lateinit var spellingChecker: SpellingChecker
     @Inject lateinit var toneEngine: ToneEngine
+    @Inject lateinit var voiceInputManager: VoiceInputManager
+    @Inject lateinit var hapticFeedbackManager: HapticFeedbackManager
 
     /**
      * Factory for creating ViewModel instances.
@@ -115,6 +117,7 @@ class SmartTypeKeyboardService : InputMethodService(),
      */
     override fun onDestroy() {
         super.onDestroy()
+        voiceInputManager.destroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         internalViewModelStore.clear()
     }
@@ -159,6 +162,13 @@ class SmartTypeKeyboardService : InputMethodService(),
         // Create ComposeView with lifecycle-aware disposal strategy
         val composeView = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            // Set layout parameters to ensure proper keyboard height
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            // Force minimum width to prevent collapsing
+            minimumWidth = resources.displayMetrics.widthPixels
         }
 
         // Install view tree owners for Compose to access lifecycle, ViewModel, and saved state
@@ -183,12 +193,50 @@ class SmartTypeKeyboardService : InputMethodService(),
 
         return composeView
     }
+    
+    /**
+     * Override to return null - we don't want a separate candidates view.
+     * All UI is in the main input view.
+     */
+    override fun onCreateCandidatesView(): View? {
+        return null
+    }
+    
+    /**
+     * Ensure the keyboard is not in fullscreen mode.
+     * This helps prevent the keyboard from collapsing.
+     */
+    override fun onEvaluateFullscreenMode(): Boolean {
+        return false
+    }
+    
+    /**
+     * Ensure extract view is not shown (for fullscreen input).
+     * This prevents the keyboard from being hidden or collapsed.
+     */
+    override fun setExtractViewShown(shown: Boolean) {
+        super.setExtractViewShown(false)
+    }
+    
+    /**
+     * Called when the keyboard window is shown.
+     * Ensures proper window configuration.
+     */
+    override fun onWindowShown() {
+        super.onWindowShown()
+        // Ensure the window is properly configured
+        window?.window?.setLayout(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+    }
 
     /**
      * Handles individual key press events.
      * Commits the character to the input field and updates ViewModel state.
      */
     private fun handleKeyPress(key: String) {
+        hapticFeedbackManager.keyPress()
         currentInputConnection?.commitText(key, 1)
         keyboardViewModel.onKeyPressed(key)
     }
@@ -206,17 +254,45 @@ class SmartTypeKeyboardService : InputMethodService(),
      * Deletes one character before the cursor.
      */
     private fun handleBackspace() {
+        hapticFeedbackManager.keyPress()
         currentInputConnection?.deleteSurroundingText(1, 0)
         keyboardViewModel.onBackspace()
     }
 
     /**
      * Handles enter key press.
-     * Inserts a newline (no automatic grammar checking).
+     * Performs IME action (Search, Next, Done, etc.) or inserts newline.
      */
     private fun handleEnter() {
-        currentInputConnection?.commitText("\n", 1)
-        keyboardViewModel.onEnter()
+        hapticFeedbackManager.specialKeyPress()
+        val imeAction = keyboardViewModel.imeAction.value
+        val connection = currentInputConnection ?: return
+        
+        when (imeAction) {
+            EditorInfo.IME_ACTION_SEARCH -> {
+                connection.performEditorAction(EditorInfo.IME_ACTION_SEARCH)
+            }
+            EditorInfo.IME_ACTION_GO -> {
+                connection.performEditorAction(EditorInfo.IME_ACTION_GO)
+            }
+            EditorInfo.IME_ACTION_SEND -> {
+                connection.performEditorAction(EditorInfo.IME_ACTION_SEND)
+            }
+            EditorInfo.IME_ACTION_NEXT -> {
+                connection.performEditorAction(EditorInfo.IME_ACTION_NEXT)
+            }
+            EditorInfo.IME_ACTION_DONE -> {
+                connection.performEditorAction(EditorInfo.IME_ACTION_DONE)
+            }
+            EditorInfo.IME_ACTION_PREVIOUS -> {
+                connection.performEditorAction(EditorInfo.IME_ACTION_PREVIOUS)
+            }
+            else -> {
+                // Default: insert newline
+                connection.commitText("\n", 1)
+                keyboardViewModel.onEnter()
+            }
+        }
     }
 
     /**
@@ -224,6 +300,7 @@ class SmartTypeKeyboardService : InputMethodService(),
      * Inserts a space (no automatic grammar checking).
      */
     private fun handleSpace() {
+        hapticFeedbackManager.specialKeyPress()
         currentInputConnection?.commitText(" ", 1)
         keyboardViewModel.onSpace()
     }
@@ -267,10 +344,19 @@ class SmartTypeKeyboardService : InputMethodService(),
     }
 
     /**
-     * Placeholder for future voice input integration.
+     * Handles voice input using SpeechRecognizer API.
      */
     private fun handleVoiceInput() {
-        // TODO: Implement voice input using SpeechRecognizer API
+        keyboardViewModel.startVoiceInput()
+        voiceInputManager.startListening(
+            onResult = { recognizedText ->
+                currentInputConnection?.commitText("$recognizedText ", 1)
+                keyboardViewModel.onVoiceInputResult(recognizedText)
+            },
+            onError = { error ->
+                keyboardViewModel.onVoiceInputError(error)
+            }
+        )
     }
 
     // Implementation of ViewModelStoreOwner interface

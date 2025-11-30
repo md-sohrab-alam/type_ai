@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
@@ -72,6 +73,8 @@ fun KeyboardComposeView(
     val isShiftPressed by viewModel.isShiftPressed.collectAsState()
     val showNumbers by viewModel.showNumbers.collectAsState()
     val showSymbols by viewModel.showSymbols.collectAsState()
+    val showEmojiKeyboard by viewModel.showEmojiKeyboard.collectAsState()
+    val imeAction by viewModel.imeAction.collectAsState()
     
     // AI menu and result state
     val showAiMenu by viewModel.showAiMenu.collectAsState()
@@ -87,6 +90,7 @@ fun KeyboardComposeView(
             .fillMaxWidth()
             .background(theme.backgroundColor)
             .padding(4.dp)
+            .heightIn(min = 300.dp) // Ensure minimum height for keyboard
     ) {
         
         // AI Menu (inline, not dialog) - Show only menu, hide keyboard
@@ -122,8 +126,16 @@ fun KeyboardComposeView(
         
         // Show keyboard only when AI menu and result are both hidden
         if (!showAiMenu && !showAiResult) {
+            // Emoji keyboard
+            if (showEmojiKeyboard) {
+                EmojiKeyboard(
+                    theme = theme,
+                    onEmojiSelect = { emoji -> onKeyPress(emoji) },
+                    onDismiss = { viewModel.closeEmojiKeyboard() }
+                )
+            }
             // Enhanced keyboard layout with caps, numbers, and symbols
-            if (showSymbols) {
+            else if (showSymbols) {
                 SymbolsKeyboardLayout(
                     theme = theme,
                     onKeyPress = onKeyPress,
@@ -141,9 +153,11 @@ fun KeyboardComposeView(
                     onSpace = onSpace,
                     onVoiceInput = onVoiceInput,
                     onAiButtonClick = { viewModel.openAiMenu() },
+                    onEmojiClick = { viewModel.toggleEmojiKeyboard() },
                     onShiftToggle = { viewModel.toggleShift() },
                     onNumbersToggle = { viewModel.toggleNumbers() },
                     onSymbolsToggle = { viewModel.toggleSymbols() },
+                    imeAction = imeAction,
                     isCapsLock = isCapsLock,
                     isShiftPressed = isShiftPressed,
                     showNumbers = showNumbers,
